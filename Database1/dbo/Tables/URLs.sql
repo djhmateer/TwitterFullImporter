@@ -1,0 +1,9 @@
+﻿CREATE TABLE [dbo].[URLs] (
+    [URLID]   INT            IDENTITY (1, 1) NOT NULL,
+    [TweetID] INT            NOT NULL,
+    [URL]     NVARCHAR (255) NOT NULL,
+    CONSTRAINT [PK_URLs] PRIMARY KEY CLUSTERED ([URLID] ASC)
+);
+
+
+

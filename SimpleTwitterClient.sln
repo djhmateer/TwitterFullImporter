@@ -1,0 +1,73 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 15
+VisualStudioVersion = 15.0.26403.7
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{00D1A9C2-B5F0-4AF3-8072-F6C62B433612}") = "Database1", "Database1\Database1.sqlproj", "{ADF3CC2C-A354-4AB6-9551-F0205EFCAD41}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TwitterStreamLoader", "TwitterStreamLoader\TwitterStreamLoader.csproj", "{41C1A853-7297-4F1B-B64C-F80B120C0F7A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TwitterProcessNoOLTP", "TwitterProcessNoOLTP\TwitterProcessNoOLTP.csproj", "{FA7968C2-367D-4AF3-9612-AD2183314989}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TwitterProcessBootstrap", "TwitterProcessBootstrap\TwitterProcessBootstrap.csproj", "{1EC05179-EFCD-43BA-9073-A6EF768E60A1}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Demos", "Demos", "{983087D5-CDB0-477A-A6B1-7CB8C09DC87E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RabbitDemo", "RabbitDemo\RabbitDemo.csproj", "{C34D4FC5-7357-4A1D-AD47-66FD84EFE729}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RedisDemo", "RedisDemo\RedisDemo.csproj", "{AA0B3189-9BE2-41C5-A1BE-4D5CD691F261}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SQLBulkCopyDemo", "SQLBulkCopyDemo\SQLBulkCopyDemo.csproj", "{A7A7DD3B-EE7B-4FB4-A668-00A6F8922AF1}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{ADF3CC2C-A354-4AB6-9551-F0205EFCAD41}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{ADF3CC2C-A354-4AB6-9551-F0205EFCAD41}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{ADF3CC2C-A354-4AB6-9551-F0205EFCAD41}.Debug|Any CPU.Deploy.0 = Debug|Any CPU
+		{ADF3CC2C-A354-4AB6-9551-F0205EFCAD41}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{ADF3CC2C-A354-4AB6-9551-F0205EFCAD41}.Release|Any CPU.Build.0 = Release|Any CPU
+		{ADF3CC2C-A354-4AB6-9551-F0205EFCAD41}.Release|Any CPU.Deploy.0 = Release|Any CPU
+		{41C1A853-7297-4F1B-B64C-F80B120C0F7A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{41C1A853-7297-4F1B-B64C-F80B120C0F7A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{41C1A853-7297-4F1B-B64C-F80B120C0F7A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{41C1A853-7297-4F1B-B64C-F80B120C0F7A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FA7968C2-367D-4AF3-9612-AD2183314989}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FA7968C2-367D-4AF3-9612-AD2183314989}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FA7968C2-367D-4AF3-9612-AD2183314989}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FA7968C2-367D-4AF3-9612-AD2183314989}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1EC05179-EFCD-43BA-9073-A6EF768E60A1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1EC05179-EFCD-43BA-9073-A6EF768E60A1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1EC05179-EFCD-43BA-9073-A6EF768E60A1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1EC05179-EFCD-43BA-9073-A6EF768E60A1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C34D4FC5-7357-4A1D-AD47-66FD84EFE729}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C34D4FC5-7357-4A1D-AD47-66FD84EFE729}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C34D4FC5-7357-4A1D-AD47-66FD84EFE729}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C34D4FC5-7357-4A1D-AD47-66FD84EFE729}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AA0B3189-9BE2-41C5-A1BE-4D5CD691F261}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AA0B3189-9BE2-41C5-A1BE-4D5CD691F261}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AA0B3189-9BE2-41C5-A1BE-4D5CD691F261}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AA0B3189-9BE2-41C5-A1BE-4D5CD691F261}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A7A7DD3B-EE7B-4FB4-A668-00A6F8922AF1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A7A7DD3B-EE7B-4FB4-A668-00A6F8922AF1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A7A7DD3B-EE7B-4FB4-A668-00A6F8922AF1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A7A7DD3B-EE7B-4FB4-A668-00A6F8922AF1}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{C34D4FC5-7357-4A1D-AD47-66FD84EFE729} = {983087D5-CDB0-477A-A6B1-7CB8C09DC87E}
+		{AA0B3189-9BE2-41C5-A1BE-4D5CD691F261} = {983087D5-CDB0-477A-A6B1-7CB8C09DC87E}
+		{A7A7DD3B-EE7B-4FB4-A668-00A6F8922AF1} = {983087D5-CDB0-477A-A6B1-7CB8C09DC87E}
+	EndGlobalSection
+	GlobalSection(Performance) = preSolution
+		HasPerformanceSessions = true
+	EndGlobalSection
+	GlobalSection(Performance) = preSolution
+		HasPerformanceSessions = true
+	EndGlobalSection
+EndGlobal
