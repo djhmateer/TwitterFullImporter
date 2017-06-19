@@ -19,6 +19,7 @@ using System.Linq;
 using System.Runtime.Caching;
 using System.Text;
 using System.Transactions;
+using Newtonsoft.Json.Linq;
 using Xunit;
 
 namespace TwitterProcessNoOLTP
@@ -35,7 +36,7 @@ namespace TwitterProcessNoOLTP
 
             if (args.Length == 0) // running this program directly (not from bootstrapper)
             {
-                Util.ClearMSSQLDatabaseAndInsertSeedLanguagesAndHashTag();
+                Util.ClearMSSQLDatabaseAndInsertSeedLanguages();
                 Util.FlushAllDatabasesFromRedis();
 
                 Util.DeleteAllFromRabbitWorkerQueue();
@@ -84,20 +85,32 @@ namespace TwitterProcessNoOLTP
 
                     Console.WriteLine();
                     Console.WriteLine($"Processing: {fileName}");
+                    var redisConnection = RedisConnectionFactory.GetConnection();
+                    var redis = redisConnection.GetDatabase();
+                    var redisKeyNumberOfJobsCurrentlyRunning = "NumberOfJobsCurrentlyRunning";
+                    long numJobsCurrentlyRunningRedisCounter;
                     try
                     {
+                        // Add 1 to redis
+                        var exists = redis.KeyExists(redisKeyNumberOfJobsCurrentlyRunning);
+                        if (!exists)
+                            redis.StringSet(redisKeyNumberOfJobsCurrentlyRunning, 1);
+                        else
+                            redis.StringIncrement(redisKeyNumberOfJobsCurrentlyRunning);
+
+                        // Setup lock for redis
+                        var lockKey = "LockToRunFinalSQL";
+                        exists = redis.KeyExists(lockKey);
+                        if (!exists)
+                            redis.StringSet(lockKey, 100);
+
                         LoadTweetsAndProcess(fileName);
 
-                        var result = channel.QueueDeclarePassive("WorkerQueue");
-                        var messagesLeftOnWorkerQueue = result?.MessageCount ?? 0;
-
-                        if (messagesLeftOnWorkerQueue == 0)
-                        {
-                            sw.Stop();
-                            Console.WriteLine($"All Done! Waiting. Finished in {sw.ElapsedMilliseconds}");
-                        }
-
+                        // job has succeeded so Ack on RabbitMQ
+                        // and decrement on redis the number of jobs currently running
                         channel.BasicAck(ea.DeliveryTag, false);
+                        numJobsCurrentlyRunningRedisCounter = redis.StringDecrement(redisKeyNumberOfJobsCurrentlyRunning);
+                        Console.WriteLine($"NumberOfJobsCurrentlyRunning {numJobsCurrentlyRunningRedisCounter}");
                     }
                     catch (Exception ex)
                     {
@@ -107,6 +120,41 @@ namespace TwitterProcessNoOLTP
                         Log.Error("LoadTweetsAndProcess {@ex}", ex);
                         Console.WriteLine("Rejecting message");
                         channel.BasicReject(ea.DeliveryTag, true);
+                    }
+
+                    // are there more on the queue to be processed (need to check this if we're in a single threaded scenario
+                    // or just a running on a few and condition where all have just finished)
+                    var result = channel.QueueDeclarePassive("WorkerQueue");
+                    var messagesLeftOnRabbitWorkerQueue = result?.MessageCount ?? 0;
+                    if (messagesLeftOnRabbitWorkerQueue == 0)
+                    {
+                        // Have seen situation when the same thread displays this twice
+                        Console.WriteLine($"Parallel thread work done! Waiting. Finished in {sw.ElapsedMilliseconds}");
+                        Console.WriteLine(DateTime.Now.ToString("HH:mm:ss.fff"));
+
+                        numJobsCurrentlyRunningRedisCounter = (long)redis.StringGet(redisKeyNumberOfJobsCurrentlyRunning);
+                        if (numJobsCurrentlyRunningRedisCounter == 0)
+                        {
+                            // it is possible for 2 jobs to see numJobs==0 .. so need one of them to get a lock
+                            // decrement and get the value in 1 atomic operation
+                            // starting value is 100. Have only ever seen 2 threads contend (out of 7)
+                            var redisLockKey = "LockToRunFinalSQL";
+                            var lockKeyValue = redis.StringDecrement(redisLockKey);
+                            if (lockKeyValue == 99)
+                            {
+                                Console.WriteLine($"Got Lock! {lockKeyValue}");
+                                sw.Reset();
+                                sw.Start();
+                                RunSQLToImportToMainTables();
+                                sw.Stop();
+                                Console.WriteLine($"Finished RunSQLToImportToMainTables in {sw.ElapsedMilliseconds}");
+
+                                // Remove lock from redis as no longer need it
+                                redis.KeyDelete(redisLockKey);
+                            }
+                            else
+                                Console.WriteLine($"No Lock {lockKeyValue}");
+                        }
                     }
                 };
                 Console.ReadLine();
@@ -129,6 +177,9 @@ namespace TwitterProcessNoOLTP
             var tweetsDictionary = new Dictionary<long, TweetTmp>(); // tweet.id, interesting twitter fields
             var tweetHashTagDictionary = new Dictionary<long, List<int>>(); // tweet.id, list<HashTagID>
             var hashTagDictionary = new Dictionary<int, string>(); // hashTagID (from redis), hashTagName
+
+            var redisConnection = RedisConnectionFactory.GetConnection();
+            var redis = redisConnection.GetDatabase();
 
             using (mp.Step("Deserialise and Redis lookups"))
                 foreach (var json in jsonLines)
@@ -156,10 +207,6 @@ namespace TwitterProcessNoOLTP
                         TimeInserted = DateTime.Now,
                     };
 
-
-                    var redisConnection = RedisConnectionFactory.GetConnection();
-                    var redis = redisConnection.GetDatabase();
-
                     // 1. Get the LanguageID by looking up what Lang is eg fr
                     tt.LanguageID = GetLanguageIDFromLanguageShortCode(tweet.lang, redis);
                     tt.Lang = tweet.lang; // so we can do insert into mssql if needed (a new language)
@@ -174,7 +221,10 @@ namespace TwitterProcessNoOLTP
                         // loop over all hashtags from Tweet
                         for (var i = 0; i < countOfHashTags; i++)
                         {
-                            var hashTagText = tweet.entities.hashtags[i].text.Trim();
+                            var hashTagTextOrig = tweet.entities.hashtags[i].text.Trim();
+
+                            // make it case insensitive
+                            var hashTagText = hashTagTextOrig.ToLower();
 
                             var hashTagRedisKey = $"HashTag:{hashTagText}";
                             var hashTagID = redis.StringGet(hashTagRedisKey);
@@ -207,10 +257,10 @@ namespace TwitterProcessNoOLTP
                     if (!tweetsDictionary.ContainsKey(tweetIDFromTwitter))
                         tweetsDictionary.Add(tweetIDFromTwitter, tt);
 
-                    // Stop duplicate tweets being added to TweetHashTag
+                    // Stop duplicate tweets being added to TweetHashTag.. note that 1 tweetID has a list of HashTagID's 
+                    // (sometimes Twitter sends dupe tweets)
                     if (!tweetHashTagDictionary.ContainsKey(tweetIDFromTwitter))
                         tweetHashTagDictionary.Add(tweetIDFromTwitter, listOfHashTagIDs);
-
                 }
 
             // Create lists for BCP
@@ -230,8 +280,8 @@ namespace TwitterProcessNoOLTP
                 tweetsData.Add(item.Value); // interesting twitter fields (includes the tweet.id)
 
             foreach (var listOfHashTagIDs in tweetHashTagDictionary)
-                foreach (var hashTagID in listOfHashTagIDs.Value)
-                    tweetHashTagData.Add(new TweetHashTagTmp { TweetIDFromTwitter = listOfHashTagIDs.Key, HashTagID = hashTagID }); // tweet.id, list<HashTagID>
+            foreach (var hashTagID in listOfHashTagIDs.Value)
+                tweetHashTagData.Add(new TweetHashTagTmp { TweetIDFromTwitter = listOfHashTagIDs.Key, HashTagID = hashTagID }); // tweet.id, list<HashTagID>
 
             foreach (var item in hashTagDictionary)
                 hashTagsData.Add(new HashTagTmp { HashTagID = item.Key, HashTagName = item.Value }); // hashTagID (from redis), hashTagName
@@ -294,7 +344,7 @@ namespace TwitterProcessNoOLTP
 
                     // TweetsTmp
                     using (var reader = ObjectReader.Create(tweetsData, "Text", "UserIDFromTwitter", "TweetIDFromTwitter",
-                            "Lang", "LanguageID", "TimeInserted", "CreatedAtFromTwitter"))
+                        "Lang", "LanguageID", "TimeInserted", "CreatedAtFromTwitter"))
                     {
                         bcp.DestinationTableName = "#TweetsTmp";
                         bcp.WriteToServer(reader);
@@ -316,83 +366,33 @@ namespace TwitterProcessNoOLTP
                 }
 
                 // copy all into all stage tables
+                // doesn't matter if we have duplicates in here
+                // just get the data in really fast (and no deadlocks)
                 var sql2 = @"
-                    INSERT INTO LangTmp --WITH (TABLOCK)
+                    INSERT INTO LangTmp
                         SELECT *
                         FROM #LangTmp lt
-                        --WHERE NOT EXISTS (SELECT LanguageID
-                        --                  FROM LangTmp l
-                        --                  WHERE l.LanguageID = lt.LanguageID)
 
-
-                    INSERT INTO UsersTmp --WITH (TABLOCK)
+                    INSERT INTO UsersTmp 
                         SELECT *
                         FROM #UsersTmp
 
-                        INSERT INTO TweetsTmp --WITH (TABLOCK)
+                    INSERT INTO TweetsTmp 
                         SELECT *
                         FROM #TweetsTmp
 
-                    INSERT INTO TweetHashTagTmp --WITH (TABLOCK)
+                    INSERT INTO TweetHashTagTmp 
                         SELECT *
                         FROM #TweetHashTagTmp
 
-                    INSERT INTO HashTagsTmp --WITH (TABLOCK)
+                    INSERT INTO HashTagsTmp 
                         SELECT *
                         FROM #HashTagsTmp
                         ";
 
-                using (mp.Step("TweetsTmp..watch for deadlocks"))
+                using (mp.Step("Inserting from #xTmp to xTmp"))
                     db.Execute(sql2);
 
-                //sql = @"-- Insert any new Languages
-                //            INSERT INTO Languages --WITH (TABLOCK)
-                //                (LanguageID, Shortcode, Name) 
-                //                SELECT lt.LanguageID, lt.ShortCode, '' 
-                //             FROM   LangTmp lt 
-                //             WHERE  NOT EXISTS (SELECT LanguageID 
-                //                  FROM   Languages l 
-                //                  WHERE  l.LanguageID = lt.LanguageID) 
-
-                //            -- Insert any new Users
-                //            INSERT INTO Users --WITH (TABLOCK)
-                //                (Name, UserIDFromTwitter) 
-                //                SELECT ut.Name,ut.UserIDFromTwitter 
-                //                FROM   UsersTmp ut 
-                //                WHERE  NOT EXISTS (SELECT UserIDFromTwitter 
-                //                                    FROM   Users u 
-                //                                    WHERE  u.UserIDFromTwitter = ut.UserIDFromTwitter) 
-
-                //            -- Insert Tweets (all users are in now) 
-                //            INSERT INTO Tweets --WITH (TABLOCK) 
-                //                (CreatedAtFromTwitter,TweetIDFromTwitter,Text,UserID,LanguageID, TimeInserted) 
-                //                SELECT CreatedAtFromTwitter, TweetIDFromTwitter, Text, u.UserID, tt.LanguageID, TimeInserted 
-                //                FROM   #TweetsTmp tt 
-                //                JOIN Users u ON u.UserIDFromTwitter = tt.UserIDFromTwitter
-                //                -- check not a duplicate tweet insert (this would happen if twitter sent a duplicate tweet which spanned import files)
-                //                WHERE  NOT EXISTS (SELECT TweetIDFromTwitter 
-                //                                    FROM Tweets t 
-                //                                    WHERE  t.TweetIDFromTwitter = tt.TweetIDFromTwitter) 
-
-                //            -- Insert any new HashTags
-                //            INSERT INTO HashTags --WITH (TABLOCK) 
-                //                (HashTagID,Name) 
-                //                SELECT htt.HashTagID, htt.Name 
-                //             FROM   #HashTagsTmp htt 
-                //             WHERE  NOT EXISTS (SELECT ht.HashTagID
-                //                  FROM   HashTags ht 
-                //                  WHERE  ht.HashTagID = htt.HashTagID) 
-
-                //            -- Insert TweetHashTag (all Tweets nd all HashTags are in now)
-                //            INSERT INTO TweetHashTag --WITH (TABLOCK)
-                //                (TweetIDFromTwitter, TweetID, HashTagID)
-                //                SELECT thtt.TweetIDFromTwitter, t.tweetID, thtt.HashTagID
-                //                FROM #TweetHashTagTmp thtt
-                //                JOIN Tweets t on t.TweetIDFromTwitter = thtt.TweetIDFromTwitter
-                //            ";
-
-                //using (mp.Step("Inserts into Users and Tweets"))
-                //     db.Execute(sql);
                 tran.Complete();
             }
 
@@ -408,10 +408,92 @@ namespace TwitterProcessNoOLTP
 
             MiniProfiler.Settings.ProfilerProvider.Stop(false);
             // have seen deadlocks here on 7 different processes running!
-            //MiniProfiler.Settings.Storage.Save(MiniProfiler.Current);
             Console.WriteLine(MiniProfiler.Current.RenderPlainText());
-            Console.WriteLine();
             mp = MiniProfiler.Start();
+        }
+
+        private static void RunSQLToImportToMainTables()
+        {
+            using (var tran = new TransactionScope())
+            using (var db = Util.GetOpenConnection())
+            {
+                var sql = @"-- Insert any new Languages
+                        INSERT INTO Languages 
+                            (LanguageID, Shortcode, Name) 
+                            SELECT lt.LanguageID, lt.ShortCode, '' 
+                         FROM   LangTmp lt 
+                         WHERE  NOT EXISTS (SELECT LanguageID 
+                              FROM   Languages l 
+                              WHERE  l.LanguageID = lt.LanguageID) ";
+                db.Execute(sql);
+                sql = @"
+                        -- Insert any new Users
+                           INSERT INTO Users 
+                            (Name, UserIDFromTwitter) 
+  
+	                        -- take any name
+                            -- a user can be in multiple times in the UsersTmp
+                            -- want only 1 unique user
+	                        SELECT ut.Name, ut.UserIDFromTwitter
+	                        FROM (SELECT ut.*,
+				                         row_number() OVER (partition by UserIDFromTwitter order by [Name]) as seqnum
+		                          from UsersTmp ut
+		                         ) ut
+	                        WHERE seqnum = 1
+                            AND  NOT EXISTS (SELECT UserIDFromTwitter 
+                                                FROM   Users u 
+                                                WHERE  u.UserIDFromTwitter = ut.UserIDFromTwitter)";
+                db.Execute(sql);
+                sql = @"
+                        -- Insert Tweets (all users are in now) 
+                        INSERT INTO Tweets 
+                            (CreatedAtFromTwitter,TweetIDFromTwitter,Text,UserID,LanguageID, TimeInserted) 
+
+	                        -- take any tweet (if multiple)
+                            SELECT tt.CreatedAtFromTwitter, tt.TweetIDFromTwitter, tt.Text, u.UserID, tt.LanguageID, tt.TimeInserted 
+                            FROM (select tt.*,
+				                         row_number() over (partition by TweetIDFromTwitter order by TimeInserted desc) as seqnum
+		                          from TweetsTmp tt
+		                         ) tt
+                            JOIN Users u ON u.UserIDFromTwitter = tt.UserIDFromTwitter
+	                        where seqnum = 1
+                            -- check not a duplicate tweet insert (this would happen if twitter sent a duplicate tweet which spanned import files)
+	                        -- this does happen..approx 1 in 200k
+
+	                        -- check Tweet not in there already..would be very strange.
+                            AND NOT EXISTS (SELECT TweetIDFromTwitter 
+                                                FROM Tweets t 
+                                                WHERE  t.TweetIDFromTwitter = tt.TweetIDFromTwitter) ";
+
+                db.Execute(sql);
+                sql = @"
+                        -- Insert any new HashTags
+                        INSERT INTO HashTags 
+                        (HashTagID,Name) 
+	                    -- take any HashTag (if multiple).. explore why there are so many multiples..maybe a way to reduce
+	                    -- still need the safety here of dupe checker
+
+	                    -- this is case sensitive, which is okay as twitter works this way eg #hastag is same as #Hashtag
+                        SELECT distinct htt.HashTagID, htt.Name 
+                        FROM HashTagsTmp htt 
+		
+                        WHERE  NOT EXISTS (SELECT ht.HashTagID
+                            FROM   HashTags ht 
+                            WHERE  ht.HashTagID = htt.HashTagID)";
+
+                db.Execute(sql);
+                sql = @"
+                        -- Insert TweetHashTag (all Tweets and all HashTags are in now)
+                        INSERT INTO TweetHashTag 
+                            (TweetIDFromTwitter, TweetID, HashTagID)
+                            SELECT thtt.TweetIDFromTwitter, t.tweetID, thtt.HashTagID
+                            FROM TweetHashTagTmp thtt
+                            JOIN Tweets t on t.TweetIDFromTwitter = thtt.TweetIDFromTwitter
+                        ";
+
+                db.Execute(sql);
+                tran.Complete();
+            }
         }
 
         // integration tests clear down db and redis before the run each test
@@ -444,7 +526,7 @@ namespace TwitterProcessNoOLTP
         [Fact]
         public void GivenNewShortCode_ShouldReturnANewLanguageIDGenereatedFromRedis()
         {
-            Util.ClearMSSQLDatabaseAndInsertSeedLanguagesAndHashTag();
+            Util.ClearMSSQLDatabaseAndInsertSeedLanguages();
             Util.FlushAllDatabasesFromRedis();
 
             var redisConnection = RedisConnectionFactory.GetConnection();
@@ -505,7 +587,7 @@ namespace TwitterProcessNoOLTP
         private static void ResetRedisAndMssql()
         {
             Util.FlushAllDatabasesFromRedis();
-            Util.ClearMSSQLDatabaseAndInsertSeedLanguagesAndHashTag();
+            Util.ClearMSSQLDatabaseAndInsertSeedLanguages();
             Util.UpdateRedisLanguageCacheAndLargestLanguageIDFromMSSQL();
         }
 
@@ -620,8 +702,8 @@ namespace TwitterProcessNoOLTP
 
         private static void SplitFileIntoSmallerOnes()
         {
-            var path = @"c:\Tweets\";
-            var bigFileNameNoExtension = "Night2702_1";
+            var path = @"d:\Tweets\";
+            var bigFileNameNoExtension = "Data1906";
 
             var readPath = path + $"{bigFileNameNoExtension}.json";
             var jsonLines = File.ReadLines(readPath);
@@ -637,7 +719,7 @@ namespace TwitterProcessNoOLTP
                 {
                     if (numberOfLinesLeft % chunckSize == 0)
                     {
-                        writePath = path + $@"split\{bigFileNameNoExtension}_{numberOfLinesLeft}.json";
+                        writePath = path + $@"split1906\{bigFileNameNoExtension}_{numberOfLinesLeft}.json";
                         Console.WriteLine(numberOfLinesLeft);
                         File.AppendAllLines(writePath, list);
                         list.Clear();
@@ -645,8 +727,8 @@ namespace TwitterProcessNoOLTP
                 }
                 numberOfLinesLeft--;
             }
-            // write out the final file 0-chuncksize
-            writePath = path + $@"split\{bigFileNameNoExtension}_0.json";
+            // write out the final file 0-chunksize
+            writePath = path + $@"split1906\{bigFileNameNoExtension}_0.json";
             File.AppendAllLines(writePath, list);
             Console.WriteLine("done splitting");
         }
@@ -669,7 +751,6 @@ namespace TwitterProcessNoOLTP
 
             Log.Logger = new LoggerConfiguration()
                 .MinimumLevel.Debug()
-                //.WriteTo.RollingFile(new JsonFormatter(), @"C:\ELK-Stack\logs\TwitterProcessNoOLTPLog-{Date}.txt")
                 .WriteTo.RollingFile(new JsonFormatter(), @"C:\ELK-Stack\logs\TwitterProcessNoOLTPLog-{Hour}.txt")
                 .Enrich.WithProperty("ApplicationName", "TwitterProcessNoOLTPLog")
                 .CreateLogger();
@@ -697,15 +778,6 @@ namespace TwitterProcessNoOLTP
             string connectionString;
 
             connectionString = "localhost,allowAdmin=true";
-
-            if (Environment.MachineName == "XPS")
-                connectionString = "192.168.1.112,allowAdmin=true";
-
-            //if (Environment.MachineName == "SQL2016F")
-            //    connectionString = "simpletwitter.redis.cache.windows.net,allowAdmin=true,abortConnect=false,ssl=true,password=aT1ghsxPXYT3bFfJtOIdOYqZ9SbvvPPiGilpYpgu66I=";
-
-            if (Environment.MachineName == "W2016")
-                connectionString = "simpletwitter.redis.cache.windows.net,allowAdmin=true,abortConnect=false,ssl=true,password=pmmFqq/f7bntTr5JF+adSrJcvdZc/pbmNE6LhyyQc4s=";
 
             var options = ConfigurationOptions.Parse(connectionString);
             Connection = new Lazy<ConnectionMultiplexer>(() => ConnectionMultiplexer.Connect(options));
@@ -790,7 +862,7 @@ namespace TwitterProcessNoOLTP
                 var result = model.QueueDeclarePassive("RawTweets");
                 numberLeftOnQueue = result?.MessageCount ?? 0;
 
-                var path = @"d:\Tweets\Data2604.json";
+                var path = @"d:\Tweets\Data1906.json";
                 if (numberLeftOnQueue > 999)
                 {
                     if (numberLeftOnQueue % 1000 == 0)
@@ -812,12 +884,9 @@ namespace TwitterProcessNoOLTP
         }
     }
 
-    
     class Point
     {
         public double Lat { get; set; }
         public double Lon { get; set; }
     }
 }
-
-

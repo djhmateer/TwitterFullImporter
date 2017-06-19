@@ -14,35 +14,36 @@ namespace RabbitDemo
             //Send();
             //Receive();
 
-            //SendDurable();
-
             SendTaskQueue();
             ReceiveTaskQueue();
         }
 
         static void Send()
         {
-            var factory = new ConnectionFactory() { HostName = "localhost" };
+            var factory = new ConnectionFactory { HostName = "localhost" };
             using (var connection = factory.CreateConnection())
             using (var channel = connection.CreateModel())
             {
                 // declaring a queue is idempotent - will only be created if doesn't exist already
-                channel.QueueDeclare(queue: "TestQueue", durable: false, exclusive: false, autoDelete: false, arguments: null);
+                channel.QueueDeclare(queue: "TestQueue", durable: false,
+                    exclusive: false, autoDelete: false, arguments: null);
 
                 string message = "Hello World!";
                 var body = Encoding.UTF8.GetBytes(message);
-                channel.BasicPublish(exchange: "", routingKey: "TestQueue", basicProperties: null, body: body);
+                channel.BasicPublish(exchange: "", routingKey: "TestQueue",
+                    basicProperties: null, body: body);
             }
             Console.WriteLine("Done - put message on Queue");
         }
 
         static void Receive()
         {
-            var factory = new ConnectionFactory() { HostName = "localhost" };
+            var factory = new ConnectionFactory { HostName = "localhost" };
             using (var connection = factory.CreateConnection())
             using (var channel = connection.CreateModel())
             {
-                channel.QueueDeclare(queue: "TestQueue", durable: false, exclusive: false, autoDelete: false, arguments: null);
+                channel.QueueDeclare(queue: "TestQueue", durable: false, exclusive: false,
+                    autoDelete: false, arguments: null);
 
                 var consumer = new EventingBasicConsumer(channel);
 
@@ -60,35 +61,14 @@ namespace RabbitDemo
             }
         }
 
-        static void SendDurable()
-        {
-            var factory = new ConnectionFactory() { HostName = "localhost" };
-            using (var connection = factory.CreateConnection())
-            using (var channel = connection.CreateModel())
-            {
-                // durable queue
-                channel.QueueDeclare(queue: "DurableQueue", durable: true, exclusive: false, autoDelete: false, arguments: null);
-
-                string message = "Hello World!";
-                var body = Encoding.UTF8.GetBytes(message);
-
-                // notice I have to make the message persistent too to make it durable through a restart
-                var properties = channel.CreateBasicProperties();
-                properties.Persistent = true;
-                channel.BasicPublish(exchange: "", routingKey: "DurableQueue", basicProperties: properties, body: body);
-            }
-
-            Console.WriteLine("Done");
-            Console.ReadLine();
-        }
-
         static void SendTaskQueue()
         {
-            var factory = new ConnectionFactory() { HostName = "localhost" };
+            var factory = new ConnectionFactory { HostName = "localhost" };
             using (var connection = factory.CreateConnection())
             using (var channel = connection.CreateModel())
             {
-                channel.QueueDeclare(queue: "task_queue",durable: true,exclusive: false,autoDelete: false,arguments: null);
+                channel.QueueDeclare(queue: "task_queue", durable: true, exclusive: false,
+                    autoDelete: false, arguments: null);
 
                 for (int i = 0; i < 5; i++)
                 {
@@ -96,8 +76,10 @@ namespace RabbitDemo
                     var body = Encoding.UTF8.GetBytes(message);
 
                     var properties = channel.CreateBasicProperties();
+                    // notice I have to make the message persistent too to make it durable through a restart
                     properties.Persistent = true;
-                    channel.BasicPublish(exchange: "", routingKey: "task_queue", basicProperties: properties, body: body);
+                    channel.BasicPublish(exchange: "", routingKey: "task_queue",
+                        basicProperties: properties, body: body);
                     Console.WriteLine($" Sent to task_queue {message}");
                 }
             }
@@ -108,11 +90,12 @@ namespace RabbitDemo
 
         static void ReceiveTaskQueue()
         {
-            var factory = new ConnectionFactory() { HostName = "localhost" };
+            var factory = new ConnectionFactory { HostName = "localhost" };
             using (var connection = factory.CreateConnection())
             using (var channel = connection.CreateModel())
             {
-                channel.QueueDeclare(queue: "task_queue",durable: true,exclusive: false,autoDelete: false,arguments: null);
+                channel.QueueDeclare(queue: "task_queue", durable: true, exclusive: false,
+                    autoDelete: false, arguments: null);
 
                 // only receive 1 message at a time, and wait for Ack
                 channel.BasicQos(prefetchSize: 0, prefetchCount: 1, global: false);
@@ -142,7 +125,7 @@ namespace RabbitDemo
                 };
 
                 // noAck was true above.. now we need Ack
-                channel.BasicConsume(queue: "task_queue",noAck: false,consumer: consumer);
+                channel.BasicConsume(queue: "task_queue", noAck: false, consumer: consumer);
 
                 Console.WriteLine(" Press [enter] to exit.");
                 Console.ReadLine();

@@ -16,9 +16,6 @@ namespace SQLBulkCopyDemo
             Console.WriteLine("Truncating everthing in SQL");
             Util.ClearAllTablesInDatabase();
 
-            //Console.WriteLine("Truncating only the Temp tables");
-            //Util.ClearAllTempTablesInDatabase();
-
             Console.WriteLine("Generting user data");
             List<User> usersData = GenerateUsersData();
 
@@ -111,6 +108,6 @@ namespace SQLBulkCopyDemo
             Console.WriteLine($"time: {elapsedMilliseconds}");
         }
 
-        
+
     }
 }

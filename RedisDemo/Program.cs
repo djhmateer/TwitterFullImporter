@@ -12,12 +12,12 @@ namespace RedisDemo
         {
             FlushAllDatabasesFromRedis();
 
-            //SetValue();
-            //GetValue();
+            SetValue();
+            GetValue();
 
             //Set a list of Users
             SetListOfUserIDs();
-            //LookupIDOfUser("Roy");
+            LookupIDOfUser("Roy");
             LookupIDOfUser("Bob");
             Console.WriteLine("done");
         }
@@ -59,7 +59,7 @@ namespace RedisDemo
                 Console.WriteLine($"Redis hit: UserID {userID}");
         }
 
-        
+
 
         public static void FlushAllDatabasesFromRedis()
         {

@@ -27,6 +27,9 @@ namespace TwitterProcessNoOLTP
 
         public static string GetConnectionString()
         {
+            if (Environment.MachineName == "DAVIDMADESK5")
+                return @"Data Source=.\sql2016;initial catalog=SimpleTwitter;integrated security=True;MultipleActiveResultSets=True;";
+
             return @"Data Source=.\;initial catalog=SimpleTwitter;integrated security=True;MultipleActiveResultSets=True;";
         }
 
@@ -39,19 +42,20 @@ namespace TwitterProcessNoOLTP
             using (var connection = rabbitFactory.CreateConnection())
             using (var channel = connection.CreateModel())
             {
+                channel.QueueDelete(queue: "WorkerQueue");
                 // declaring a queue is idempotent - will only be created if doesn't exist already
                 channel.QueueDeclare(queue: "WorkerQueue", durable: true, exclusive: false, autoDelete: false, arguments: null);
 
-                var result = channel.QueueDeclarePassive("WorkerQueue");
-                var messagesLeftOnWorkerQueue = result?.MessageCount ?? 0;
+                //var result = channel.QueueDeclarePassive("WorkerQueue");
+                //var messagesLeftOnWorkerQueue = result?.MessageCount ?? 0;
 
-                var consumer = new QueueingBasicConsumer(channel);
-                channel.BasicConsume("WorkerQueue", false, consumer);
-                for (int i = 0; i < messagesLeftOnWorkerQueue; i++)
-                {
-                    var deliveryArgs = consumer.Queue.Dequeue();
-                    channel.BasicAck(deliveryArgs.DeliveryTag, false);
-                }
+                //var consumer = new QueueingBasicConsumer(channel);
+                //channel.BasicConsume("WorkerQueue", false, consumer);
+                //for (int i = 0; i < messagesLeftOnWorkerQueue; i++)
+                //{
+                //    var deliveryArgs = consumer.Queue.Dequeue();
+                //    channel.BasicAck(deliveryArgs.DeliveryTag, false);
+                //}
             }
         }
 
@@ -82,10 +86,12 @@ namespace TwitterProcessNoOLTP
         private static void SetupRabbit()
         {
             rabbitFactory = new ConnectionFactory { HostName = "localhost" };
+            if (Environment.MachineName == "XPS")
+                rabbitFactory = new ConnectionFactory { HostName = "dom", UserName = "dave", Password = "zp2737AA" };
         }
 
         // Helpers for testing
-        public static void ClearMSSQLDatabaseAndInsertSeedLanguagesAndHashTag()
+        public static void ClearMSSQLDatabaseAndInsertSeedLanguages()
         {
             using (var db = GetOpenConnection())
             {
@@ -98,7 +104,7 @@ namespace TwitterProcessNoOLTP
                             truncate table languages
                             truncate table hashtags
                             truncate table tweethashtag
-                            truncate table hashtagstmp
+
                             ALTER TABLE [dbo].[Tweets]  WITH CHECK ADD  CONSTRAINT [FK_Tweets_Users] FOREIGN KEY([UserID]) REFERENCES [dbo].[Users] ([UserID])
                             ALTER TABLE [dbo].tweethashtag  WITH CHECK ADD  CONSTRAINT FK_TweetHashTag_Tweets FOREIGN KEY([TweetID]) REFERENCES [dbo].Tweets (TweetID)
                             ALTER TABLE [dbo].tweethashtag  WITH CHECK ADD  CONSTRAINT FK_TweetHashTag_HashTags FOREIGN KEY([HashTagID]) REFERENCES [dbo].HashTags (HashTagID)
@@ -107,9 +113,11 @@ namespace TwitterProcessNoOLTP
                             truncate table userstmp
                             truncate table tweetstmp
                             truncate table tweetHashTagTmp
+                            truncate table hashtagstmp
   
                             DBCC CHECKIDENT ('[Users]', RESEED, 1);
                             DBCC CHECKIDENT ('[Tweets]', RESEED, 1);
+                            -- Identities are handled by Redis (so Identity is not on in these SQLServer tables)
                             --DBCC CHECKIDENT ('[languages]', RESEED, 1);
                             --DBCC CHECKIDENT ('[hashtags]', RESEED, 1);
                             DBCC CHECKIDENT ('[tweethashtag]', RESEED, 1);
@@ -309,7 +317,7 @@ namespace TwitterProcessNoOLTP
                         INSERT [dbo].[Languages] ([LanguageID], [ShortCode], [Name]) VALUES (187, N'ckb', N'Iraq')
                         INSERT [dbo].[Languages] ([LanguageID], [ShortCode], [Name]) VALUES (188, N'iw', N'Hebrew')
                         
-                        INSERT dbo.HashTags(HashTagID, Name) VALUES (1, 'Scotland')
+                        --INSERT dbo.HashTags(HashTagID, Name) VALUES (1, 'Scotland')
                         ";
                 db.Execute(sql);
             }

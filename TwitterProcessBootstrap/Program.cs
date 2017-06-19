@@ -11,7 +11,7 @@ namespace TwitterProcessBootstrap
         static void Main()
         {
             // Clear down everything for perf testing
-            Util.ClearMSSQLDatabaseAndInsertSeedLanguagesAndHashTag();
+            Util.ClearMSSQLDatabaseAndInsertSeedLanguages();
             Util.FlushAllDatabasesFromRedis();
 
             Util.DeleteAllFromRabbitWorkerQueue();
@@ -22,14 +22,14 @@ namespace TwitterProcessBootstrap
             // end clear down
 
             var process = new Dictionary<Process, int>();
-            for (var i = 1; i <= 3; i++)
+            for (var i = 1; i <= 7; i++)
             {
                 var p = new Process();
                 p.StartInfo.FileName = @"..\..\..\TwitterProcessNoOLTP\bin\Debug\TwitterProcessNoOLTP.exe";
                 p.StartInfo.Arguments = "bootstrapperCalling";
                 p.Start();
                 process.Add(p, i);
-                Thread.Sleep(100);
+                //Thread.Sleep(100);
             }
         }
     }
